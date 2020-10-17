@@ -25,6 +25,7 @@ class Downloader:
         self.end = [i + perSize - 1 for i in self.begin]
         self.end[self.nThread - 1] = self.size - 1
 
+    # 下载子任务
     def downloadSub(self, i):
         headers = {'Range': "bytes={}-{}".format(self.begin[i], self.end[i])}
         with closing(self.session.get(self.url, headers=headers, proxies=self.proxies, stream=True)) as resp, \
@@ -33,6 +34,7 @@ class Downloader:
                 if chunk:
                     f.write(chunk)
 
+    # 统计当前下载进度
     def statistics(self):
         while True:
             s = 0
@@ -46,6 +48,7 @@ class Downloader:
             print("\r当前进度：{}/{} {:.2f}%".format(s, self.size, r), end='')
             time.sleep(1)
 
+    # 把多个文件合并成一个文件
     def mulToOne(self):
         with open('download/{}'.format(self.name), 'wb') as f:
             for i in range(self.nThread):
@@ -54,6 +57,7 @@ class Downloader:
                     f.write(file.read())
                 os.remove(fName)
 
+    # 下载
     def download(self):
         tBegin = time.time()
         with ThreadPoolExecutor(max_workers=self.nThread) as pool:
@@ -65,7 +69,7 @@ class Downloader:
 
 
 if __name__ == '__main__':
-    url = "https://ftp.osuosl.org/pub/eclipse/oomph/epp/2020-09/R/eclipse-inst-win64.exe"
+    url = input("请输入url：")
     nThread = 64
     proxies = {'http': 'http://localhost:1081', 'https': 'http://localhost:1081'}
     downloader = Downloader(url, nThread, proxies)
