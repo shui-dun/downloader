@@ -1,8 +1,6 @@
 from concurrent.futures import *
 import requests
-import threading
 import time
-from contextlib import closing
 import os
 
 
@@ -20,57 +18,62 @@ class Downloader:
         self.url = url
         self.nThread = nThread
         self.proxies = proxies
-        perSize = self.size // self.nThread
-        self.begin = [i for i in range(0, self.size, perSize)]
-        self.end = [i + perSize - 1 for i in self.begin]
-        self.end[self.nThread - 1] = self.size - 1
+        self.pool = ThreadPoolExecutor(max_workers=self.nThread)
+        self.curThreads = 0
+
+    def testAndSplit(self, begin, end):
+        if self.curThreads < self.nThread:
+            self.pool.submit(self.downloadSub, begin, (begin + end) // 2)
+            self.pool.submit(self.downloadSub, (begin + end) // 2 + 1, end)
+            return True
+        return False
 
     # 下载子任务
-    def downloadSub(self, i):
-        headers = {'Range': "bytes={}-{}".format(self.begin[i], self.end[i])}
-        with closing(self.session.get(self.url, headers=headers, proxies=self.proxies, stream=True)) as resp, \
-                open("download/{}.{}".format(self.name, i), 'wb') as f:
-            for chunk in resp.iter_content(chunk_size=1024):
+    def downloadSub(self, begin, end):
+        self.curThreads += 1
+        if self.testAndSplit(begin, end):
+            return
+        sumBytes = 0
+        headers = {'Range': "bytes={}-{}".format(begin, end)}
+        with self.session.get(self.url, headers=headers, proxies=self.proxies, stream=True) as resp, \
+                open("download/{}".format(self.name), 'rb+') as f:
+            f.seek(begin)
+            for chunk in resp.iter_content(chunk_size=2048):
                 if chunk:
                     f.write(chunk)
+                    sumBytes += len(chunk)
+                if self.testAndSplit(begin + sumBytes, end):
+                    break
+        self.curThreads -= 1
 
-    # 统计当前下载进度
-    def statistics(self):
-        while True:
-            s = 0
-            for i in range(self.nThread):
-                file = 'download/{}.{}'.format(self.name, i)
-                if os.path.exists(file):
-                    s += os.path.getsize(file)
-            r = s / self.size * 100
-            if r == 100:
-                break
-            print("\r当前进度：{}/{} {:.2f}%".format(s, self.size, r), end='')
-            time.sleep(1)
-
-    # 把多个文件合并成一个文件
-    def mulToOne(self):
-        with open('download/{}'.format(self.name), 'wb') as f:
-            for i in range(self.nThread):
-                fName = 'download/{}.{}'.format(self.name, i)
-                with open(fName, 'rb') as file:
-                    f.write(file.read())
-                os.remove(fName)
+    # # 统计当前下载进度
+    # def statistics(self):
+    #     while True:
+    #         s = 0
+    #         for i in range(self.nThread):
+    #             file = 'download/{}.{}'.format(self.name, i)
+    #             if os.path.exists(file):
+    #                 s += os.path.getsize(file)
+    #         r = s / self.size * 100
+    #         print("\r当前进度：{}/{} {:.2f}%".format(s, self.size, r), end='')
+    #         if r == 100:
+    #             break
+    #         time.sleep(1)
 
     # 下载
     def download(self):
         tBegin = time.time()
-        with ThreadPoolExecutor(max_workers=self.nThread) as pool:
-            for i in range(self.nThread):
-                pool.submit(self.downloadSub, i)
-            self.statistics()
-        self.mulToOne()
-        print('\n花费时间：{:.2f}s'.format(time.time() - tBegin))
+        f = open('download/{}'.format(self.name), 'wb')
+        f.close()
+        self.pool.submit(self.downloadSub, 0, self.size - 1)
+        time.sleep(1000)
+        # self.statistics()
+        # print('\n花费时间：{:.2f}s'.format(time.time() - tBegin))
 
 
 if __name__ == '__main__':
-    url = input("请输入url：")
-    nThread = 64
+    url = input("请输入url：").rstrip()
+    nThread = 8
     proxies = {'http': 'http://localhost:1081', 'https': 'http://localhost:1081'}
     downloader = Downloader(url, nThread, proxies)
     downloader.download()
